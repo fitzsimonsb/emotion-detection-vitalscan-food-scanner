@@ -1,1 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Computer Vision Food Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:wght@300;400&family=Playfair+Display:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg: #0e0e0e;
+      --bg2: #141414;
+      --border: #2a2a2a;
+      --border2: #333;
+      --text: #e8e4dc;
+      --muted: #a09890;
+      --dim: #605850;
+      --dim2: #807068;
+      --accent: #c8a97e;
+      --accent2: #8b9e7a;
+    }
+
+    body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-weight: 300; min-height: 100vh; display: flex; flex-direction: column; }
+
+    header { padding: 0 3rem; height: 64px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .header-title { font-family: 'Playfair Display', serif; font-size: 1rem; font-weight: 400; }
+    .header-title em { font-style: italic; color: var(--accent); }
+    .header-tag { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+
+    main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; }
+    .left { border-right: 1px solid var(--border); padding: 2.5rem 3rem; display: flex; flex-direction: column; }
+    .right { padding: 2.5rem 3rem; display: flex; flex-direction: column; gap: 1.5rem; }
+
+    /* Camera */
+    .camera-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: var(--bg2); border: 1px solid var(--border); overflow: hidden; margin-bottom: 1rem; }
+    .camera-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .shutter { position: absolute; inset: 0; background: rgba(255,255,255,0.18); opacity: 0; pointer-events: none; transition: opacity 0.08s; }
+    .shutter.flash { opacity: 1; }
+
+    .preview-wrap { position: relative; width: 100%; aspect-ratio: 4/3; border: 1px solid var(--border); overflow: hidden; margin-bottom: 1rem; display: none; }
+    .preview-wrap canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    .scanning-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; background: rgba(14,14,14,0.6); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+    .scanning-overlay.visible { opacity: 1; }
+    .scan-line { width: 60%; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: scanline 1.6s ease-in-out infinite; }
+    @keyframes scanline { 0%{transform:translateY(-30px);opacity:0} 20%{opacity:1} 80%{opacity:1} 100%{transform:translateY(30px);opacity:0} }
+    .scan-label { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
+
+    .retake-btn { position: absolute; bottom: 0.75rem; right: 0.75rem; font-family: 'DM Mono', monospace; font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; background: rgba(14,14,14,0.75); color: var(--muted); border: 1px solid var(--border2); padding: 0.3rem 0.65rem; cursor: pointer; backdrop-filter: blur(4px); transition: color 0.2s, border-color 0.2s; }
+    .retake-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    .placeholder { position: relative; width: 100%; aspect-ratio: 4/3; background: linear-gradient(135deg, #181812 0%, #28281a 50%, #181812 100%); border: 1px solid var(--border); display: flex; align-items: flex-end; padding: 0.75rem; overflow: hidden; margin-bottom: 1rem; }
+    .placeholder::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 55% 45%, rgba(139,158,122,0.18) 0%, transparent 65%); }
+    .placeholder-label { font-family: 'DM Mono', monospace; font-size: 0.56rem; letter-spacing: 0.13em; text-transform: uppercase; color: var(--dim); position: relative; z-index: 1; }
+
+    .fc { position: absolute; width: 14px; height: 14px; border-color: var(--accent); border-style: solid; opacity: 0.45; }
+    .fc.tl { top: 8px; left: 8px; border-width: 1px 0 0 1px; }
+    .fc.tr { top: 8px; right: 8px; border-width: 1px 1px 0 0; }
+    .fc.bl { bottom: 8px; left: 8px; border-width: 0 0 1px 1px; }
+    .fc.br { bottom: 8px; right: 8px; border-width: 0 1px 1px 0; }
+
+    /* Status */
+    .status { display: flex; align-items: center; gap: 0.4rem; font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 0.75rem; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; }
+    .dot.active { background: var(--accent2); box-shadow: 0 0 6px rgba(139,158,122,0.45); animation: blink 1.8s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .phase { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); min-height: 0.9rem; margin-bottom: 0.75rem; transition: color 0.3s; }
+    .phase.live { color: var(--accent); }
+
+    /* Buttons */
+    .btn { width: 100%; font-family: 'DM Mono', monospace; font-size: 0.64rem; letter-spacing: 0.12em; text-transform: uppercase; border: none; padding: 0.85rem 2rem; cursor: pointer; transition: opacity 0.2s; display: block; }
+    .btn.start { background: var(--accent); color: var(--bg); }
+    .btn.stop { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
+    .btn.snap { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 0.5rem; }
+    .btn:hover { opacity: 0.82; }
+    .btn:active { opacity: 0.6; }
+
+    /* Results */
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 140px; gap: 0.5rem; opacity: 0.4; }
+    .empty-icon { font-size: 1.6rem; }
+    .empty-text { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+
+    .result-card { border: 1px solid var(--border); background: var(--bg2); padding: 1.25rem 1.5rem; display: none; }
+    .result-card.visible { display: block; }
+
+    .meal-tag { display: inline-block; font-family: 'DM Mono', monospace; font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--accent2); color: var(--accent2); padding: 0.15rem 0.5rem; margin-bottom: 0.85rem; }
+
+    .item-row { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .item-name { font-family: 'Playfair Display', serif; font-size: 1.05rem; font-weight: 400; color: var(--text); flex: 1; }
+    .item-conf { font-family: 'DM Mono', monospace; font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+
+    .macro-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 0.5rem; }
+    .macro-cell { display: flex; flex-direction: column; gap: 0.2rem; }
+    .macro-val { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 400; color: var(--accent); }
+    .macro-label { font-family: 'DM Mono', monospace; font-size: 0.54rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+
+    .food-notes { font-size: 0.78rem; color: var(--muted); line-height: 1.8; border-top: 1px solid var(--border); padding-top: 0.85rem; margin-top: 0.5rem; }
+    .error-msg { font-family: 'DM Mono', monospace; font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: #c87878; padding: 1rem 0; text-align: center; display: none; }
+
+    /* Tech strip */
+    .tech-strip { padding: 1.25rem 3rem; border-top: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+    .tech-text { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); line-height: 1.9; }
+
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+      .left { border-right: none; border-bottom: 1px solid var(--border); padding: 1.5rem 1.25rem; }
+      .right { padding: 1.5rem 1.25rem; }
+      header, .tech-strip { padding-left: 1.25rem; padding-right: 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-title">AI Computer Vision <em>Food Scanner</em></div>
+  <div class="header-tag">Vision AI · Demo</div>
+</header>
+
+<main>
+  <div class="left">
+    <div class="camera-wrap" id="foodCameraWrap" style="display:none">
+      <video id="foodVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
+      <div class="shutter" id="foodShutter"></div>
+      <div class="fc tl"></div><div class="fc tr"></div>
+      <div class="fc bl"></div><div class="fc br"></div>
+    </div>
+    <div class="preview-wrap" id="foodPreviewWrap">
+      <canvas id="foodPreviewCanvas"></canvas>
+      <div class="scanning-overlay" id="foodScanningOverlay">
+        <div class="scan-line"></div>
+        <div class="scan-label">Analysing…</div>
+      </div>
+      <button class="retake-btn" id="foodRetakeBtn" onclick="foodRetake()">↩ Retake</button>
+    </div>
+    <div class="placeholder" id="foodImgPh">
+      <span class="placeholder-label">Vision AI · Food Recognition</span>
+    </div>
+    <div class="status">
+      <div class="dot" id="foodDot"></div>
+      <span id="foodStatus">Ready</span>
+    </div>
+    <div class="phase" id="foodPhase"></div>
+    <button class="btn start" id="foodBtn" onclick="foodHandleBtn()">Enable Camera</button>
+    <button class="btn snap" id="foodSnapBtn" onclick="foodSnap()" style="display:none">Scan This Meal →</button>
+  </div>
+
+  <div class="right">
+    <div class="empty-state" id="foodEmpty">
+      <div class="empty-icon">🍽️</div>
+      <div class="empty-text">Point camera at food to scan</div>
+    </div>
+    <div class="result-card" id="foodResultCard">
+      <div id="foodMealTag"></div>
+      <div id="foodItemList"></div>
+      <div class="macro-grid" id="foodMacroGrid"></div>
+      <div class="food-notes" id="foodNotes"></div>
+    </div>
+    <div class="error-msg" id="foodError"></div>
+  </div>
+</main>
+
+<div class="tech-strip">
+  <span class="tech-text">A single camera frame is captured and sent as a base64-encoded JPEG to Claude Sonnet's vision API via a serverless proxy. The model identifies food items, estimates portion sizes, and returns structured nutritional data. No images are stored. One API call per scan.</span>
+</div>
+
+<script>
+(function(){
+  let foodStream=null,foodRunning=false,foodCaptured=false;
+
+  function setStatus(t,active){
+    const d=document.getElementById('foodDot');
+    const s=document.getElementById('foodStatus');
+    if(d)d.className='dot'+(active?' active':'');
+    if(s)s.textContent=t;
+  }
+  function setPhase(t,live){
+    const e=document.getElementById('foodPhase');
+    if(e){e.textContent=t;e.className='phase'+(live?' live':'');}
+  }
+
+  window.foodHandleBtn=function(){
+    if(!foodRunning){foodStartCamera();}else{foodStop();}
+  };
+
+  function foodStartCamera(){
+    navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}},audio:false
+    }).then(stream=>{
+      foodStream=stream;foodRunning=true;foodCaptured=false;
+      const video=document.getElementById('foodVideo');
+      video.srcObject=stream;video.play();
+      document.getElementById('foodImgPh').style.display='none';
+      document.getElementById('foodCameraWrap').style.display='block';
+      document.getElementById('foodPreviewWrap').style.display='none';
+      document.getElementById('foodBtn').className='btn stop';
+      document.getElementById('foodBtn').textContent='Stop';
+      document.getElementById('foodSnapBtn').style.display='block';
+      document.getElementById('foodEmpty').style.display='flex';
+      document.getElementById('foodResultCard').className='result-card';
+      document.getElementById('foodError').style.display='none';
+      setStatus('Live',true);
+      setPhase('Frame camera at your meal, then tap Scan',false);
+    }).catch(()=>{
+      setStatus('Camera denied',false);
+      setPhase('Camera access required',false);
+    });
+  }
+
+  function foodStop(){
+    foodRunning=false;foodCaptured=false;
+    if(foodStream){foodStream.getTracks().forEach(t=>t.stop());foodStream=null;}
+    document.getElementById('foodVideo').srcObject=null;
+    document.getElementById('foodCameraWrap').style.display='none';
+    document.getElementById('foodPreviewWrap').style.display='none';
+    document.getElementById('foodImgPh').style.display='flex';
+    document.getElementById('foodBtn').className='btn start';
+    document.getElementById('foodBtn').textContent='Enable Camera';
+    document.getElementById('foodSnapBtn').style.display='none';
+    setStatus('Ready',false);setPhase('',false);
+  }
+
+  window.foodRetake=function(){
+    foodCaptured=false;
+    document.getElementById('foodPreviewWrap').style.display='none';
+    document.getElementById('foodCameraWrap').style.display='block';
+    document.getElementById('foodSnapBtn').style.display='block';
+    document.getElementById('foodResultCard').className='result-card';
+    document.getElementById('foodError').style.display='none';
+    document.getElementById('foodEmpty').style.display='flex';
+    setPhase('Frame camera at your meal, then tap Scan',false);
+  };
+
+  window.foodSnap=async function(){
+    if(foodCaptured||!foodRunning)return;
+    const video=document.getElementById('foodVideo');
+    if(video.readyState<2)return;
+    const shutter=document.getElementById('foodShutter');
+    shutter.classList.add('flash');
+    setTimeout(()=>shutter.classList.remove('flash'),120);
+    const canvas=document.getElementById('foodPreviewCanvas');
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    canvas.getContext('2d').drawImage(video,0,0);
+    foodCaptured=true;
+    document.getElementById('foodCameraWrap').style.display='none';
+    document.getElementById('foodPreviewWrap').style.display='block';
+    document.getElementById('foodSnapBtn').style.display='none';
+    document.getElementById('foodEmpty').style.display='none';
+    const overlay=document.getElementById('foodScanningOverlay');
+    const retake=document.getElementById('foodRetakeBtn');
+    overlay.classList.add('visible');retake.style.display='none';
+    setStatus('Analysing…',true);setPhase('Sending to Claude Vision…',true);
+    const compressed=document.createElement('canvas');
+    const maxW=800,scale=Math.min(1,maxW/canvas.width);
+    compressed.width=Math.round(canvas.width*scale);compressed.height=Math.round(canvas.height*scale);
+    compressed.getContext('2d').drawImage(canvas,0,0,compressed.width,compressed.height);
+    const b64=compressed.toDataURL('image/jpeg',0.82).split(',')[1];
+    try{
+      const resp=await fetch('/api/scan-food',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-20250514',
+          max_tokens:1000,
+          messages:[{role:'user',content:[
+            {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
+            {type:'text',text:`You are a food recognition and nutrition assistant. Analyse this food image and respond ONLY with a JSON object — no preamble, no markdown, no backticks.\n\nJSON format:\n{\n  "identified": true,\n  "meal_type": "Breakfast",\n  "items": [\n    {"name": "Scrambled eggs", "confidence": "high"},\n    {"name": "Toast", "confidence": "high"},\n    {"name": "Black coffee", "confidence": "medium"}\n  ],\n  "nutrition": {\n    "calories": 420,\n    "protein_g": 22,\n    "carbs_g": 38,\n    "fat_g": 18\n  },\n  "notes": "A well-balanced breakfast with good protein content."\n}\n\nIf no food is visible, return: {"identified": false}\nConfidence is "high", "medium", or "low". Nutrition values are estimates. Notes: 1–2 sentences max.`}
+          ]}]
+        })
+      });
+      const data=await resp.json();
+      overlay.classList.remove('visible');retake.style.display='block';
+      if(!resp.ok)throw new Error(data.error?.message||`API error ${resp.status}`);
+      const raw=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+      const result=JSON.parse(raw.replace(/```json|```/g,'').trim());
+      if(!result.identified){
+        document.getElementById('foodError').textContent='No food detected. Try a clearer shot.';
+        document.getElementById('foodError').style.display='block';
+        setStatus('Ready',false);setPhase('No food detected',false);return;
+      }
+      renderResult(result);
+      setStatus('Done',false);setPhase('Scan complete',false);
+    }catch(err){
+      const o=document.getElementById('foodScanningOverlay');if(o)o.classList.remove('visible');
+      const r=document.getElementById('foodRetakeBtn');if(r)r.style.display='block';
+      const msg=err.message||'Unknown error';
+      document.getElementById('foodError').textContent='Error: '+msg;
+      document.getElementById('foodError').style.display='block';
+      setStatus('Error',false);setPhase('',false);
+      console.error('Food scan error:',err);
+    }
+  };
+
+  function renderResult(r){
+    const tagEl=document.getElementById('foodMealTag');
+    if(r.meal_type)tagEl.innerHTML=`<div class="meal-tag">${r.meal_type}</div>`;
+    const itemEl=document.getElementById('foodItemList');
+    if(r.items&&r.items.length){
+      itemEl.innerHTML=r.items.map(item=>`
+        <div class="item-row">
+          <div class="item-name">${item.name}</div>
+          <div class="item-conf">${item.confidence}</div>
+        </div>`).join('');
+    }
+    const macroEl=document.getElementById('foodMacroGrid');
+    if(r.nutrition){
+      const n=r.nutrition;
+      macroEl.innerHTML=`
+        <div class="macro-cell"><div class="macro-val">${n.calories||'—'}</div><div class="macro-label">kcal</div></div>
+        <div class="macro-cell"><div class="macro-val">${n.protein_g||'—'}g</div><div class="macro-label">Protein</div></div>
+        <div class="macro-cell"><div class="macro-val">${n.carbs_g||'—'}g</div><div class="macro-label">Carbs</div></div>
+        <div class="macro-cell"><div class="macro-val">${n.fat_g||'—'}g</div><div class="macro-label">Fat</div></div>`;
+    }
+    const notesEl=document.getElementById('foodNotes');
+    if(r.notes)notesEl.textContent=r.notes;
+    document.getElementById('foodResultCard').className='result-card visible';
+    document.getElementById('foodEmpty').style.display='none';
+    document.getElementById('foodError').style.display='none';
+  }
+})();
+</script>
+</body>
+</html>

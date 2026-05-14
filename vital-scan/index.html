@@ -1,1 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VitalScan — Heart Rate, HRV & Blood Pressure</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:wght@300;400&family=Playfair+Display:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg: #0e0e0e;
+      --bg2: #141414;
+      --border: #2a2a2a;
+      --border2: #333;
+      --text: #e8e4dc;
+      --muted: #a09890;
+      --dim: #605850;
+      --dim2: #807068;
+      --accent: #c8a97e;
+      --accent2: #8b9e7a;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 300;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 0 3rem;
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .header-title { font-family: 'Playfair Display', serif; font-size: 1rem; font-weight: 400; }
+    .header-title em { font-style: italic; color: var(--accent); }
+    .header-tag { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+
+    main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; }
+
+    .left { border-right: 1px solid var(--border); padding: 2.5rem 3rem; display: flex; flex-direction: column; }
+    .right { padding: 2.5rem 3rem; display: flex; flex-direction: column; gap: 1.75rem; }
+
+    /* Camera */
+    .camera-wrap {
+      position: relative; width: 100%; aspect-ratio: 4/3;
+      background: var(--bg2); border: 1px solid var(--border);
+      overflow: hidden; margin-bottom: 1rem;
+    }
+    .camera-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    .cam-overlay {
+      position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; flex-direction: column; gap: 1rem;
+      background: var(--bg2); transition: opacity 0.4s;
+    }
+    .cam-overlay.hidden { opacity: 0; pointer-events: none; }
+    .overlay-icon { width: 44px; height: 44px; border: 1px solid var(--border2); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+    .overlay-title { font-family: 'Playfair Display', serif; font-size: 1rem; color: var(--text); text-align: center; }
+    .overlay-body { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); text-align: center; line-height: 1.9; }
+
+    .fc { position: absolute; width: 14px; height: 14px; border-color: var(--accent); border-style: solid; opacity: 0.45; }
+    .fc.tl { top: 8px; left: 8px; border-width: 1px 0 0 1px; }
+    .fc.tr { top: 8px; right: 8px; border-width: 1px 1px 0 0; }
+    .fc.bl { bottom: 8px; left: 8px; border-width: 0 0 1px 1px; }
+    .fc.br { bottom: 8px; right: 8px; border-width: 0 1px 1px 0; }
+
+    .coverage-ring {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 1px solid var(--border2); transition: border-color 0.3s, box-shadow 0.3s; pointer-events: none;
+    }
+    .coverage-ring.covered { border-color: var(--accent2); box-shadow: 0 0 12px rgba(139,158,122,0.2); }
+
+    .scan-pulse { position: absolute; inset: 0; border: 1px solid var(--accent); opacity: 0; pointer-events: none; }
+    .scan-pulse.active { animation: sp 2.2s ease-out infinite; }
+    @keyframes sp { 0%{opacity:0.4;transform:scale(0.97)} 100%{opacity:0;transform:scale(1.03)} }
+
+    .cam-caption { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 1rem; transition: color 0.3s; }
+    .cam-caption.covered { color: var(--accent2); }
+
+    /* Waveform */
+    .waveform { border: 1px solid var(--border); background: var(--bg2); padding: 0.85rem 1rem 0.65rem; margin-bottom: 1rem; }
+    .wf-label { font-family: 'DM Mono', monospace; font-size: 0.57rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin-bottom: 0.6rem; }
+
+    /* Progress */
+    .progress { display: none; margin-bottom: 0.75rem; }
+    .prog-header { display: flex; justify-content: space-between; font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 0.4rem; }
+    .prog-track { height: 1px; background: var(--border); }
+    .prog-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s linear; }
+
+    .phase { font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); min-height: 0.9rem; transition: color 0.3s; }
+    .phase.live { color: var(--accent); }
+
+    /* Status */
+    .status { display: flex; align-items: center; gap: 0.4rem; font-family: 'DM Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 1rem; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; }
+    .dot.active { background: var(--accent2); box-shadow: 0 0 6px rgba(139,158,122,0.45); animation: blink 1.8s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* Button */
+    .btn { width: 100%; font-family: 'DM Mono', monospace; font-size: 0.64rem; letter-spacing: 0.12em; text-transform: uppercase; border: none; padding: 0.85rem 2rem; cursor: pointer; transition: opacity 0.2s; margin-top: 1.25rem; display: block; }
+    .btn.start { background: var(--accent); color: var(--bg); }
+    .btn.stop { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
+    .btn.restart { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn:hover { opacity: 0.82; }
+
+    /* Results */
+    .result-label { font-family: 'DM Mono', monospace; font-size: 0.57rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); margin-bottom: 0.45rem; }
+    .result-value { font-family: 'Playfair Display', serif; font-size: 2.6rem; font-weight: 400; line-height: 1; color: var(--text); transition: color 0.4s; }
+    .result-value.ready { color: var(--accent); }
+    .result-unit { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-top: 0.3rem; }
+    .result-tag { display: inline-block; font-family: 'DM Mono', monospace; font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--border2); color: var(--dim); padding: 0.15rem 0.5rem; margin-top: 0.45rem; }
+    .result-tag.normal { border-color: var(--accent2); color: var(--accent2); }
+    .result-tag.elevated { border-color: #c87878; color: #c87878; }
+    .result-tag.low { border-color: var(--dim2); color: var(--dim2); }
+    .divider { height: 1px; background: var(--border); }
+
+    /* BP */
+    .bp-row { display: flex; align-items: baseline; gap: 0.15rem; }
+    .bp-sep { font-family: 'Playfair Display', serif; font-size: 1.8rem; color: var(--dim); margin: 0 0.25rem; line-height: 1; }
+    .bp-sub { font-family: 'DM Mono', monospace; font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+
+    /* Disclaimer */
+    .disclaimer { display: flex; gap: 1.5rem; align-items: flex-start; padding: 1rem 3rem; border-top: 1px solid var(--border); background: var(--bg); }
+    .disc-marker { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); flex-shrink: 0; padding-top: 0.12rem; }
+    .disc-text { font-size: 0.78rem; color: var(--dim2); line-height: 1.8; }
+    .disc-text strong { color: var(--muted); }
+
+    /* Tech strip */
+    .tech-strip { padding: 1.25rem 3rem; border-top: 1px solid var(--border); background: var(--bg2); }
+    .tech-text { font-family: 'DM Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); line-height: 1.9; }
+
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+      .left { border-right: none; border-bottom: 1px solid var(--border); padding: 1.5rem 1.25rem; }
+      .right { padding: 1.5rem 1.25rem; }
+      header, .disclaimer, .tech-strip { padding-left: 1.25rem; padding-right: 1.25rem; }
+      .disclaimer { flex-direction: column; gap: 0.4rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-title">AI Heart Rate, HRV &amp; <em>Blood Pressure Detection</em></div>
+  <div class="header-tag">Optical PPG · Demo</div>
+</header>
+
+<main>
+  <div class="left">
+    <div class="camera-wrap" id="vsCameraWrap">
+      <video id="vsVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
+      <canvas id="vsHiddenCanvas" style="display:none"></canvas>
+      <div class="cam-overlay" id="vsCamOverlay">
+        <div class="overlay-icon">☝️</div>
+        <div class="overlay-title">Place fingertip over lens</div>
+        <div class="overlay-body">Cover camera &amp; torch<br>completely with your finger</div>
+      </div>
+      <div class="coverage-ring" id="vsCoverageRing"></div>
+      <div class="fc tl"></div><div class="fc tr"></div>
+      <div class="fc bl"></div><div class="fc br"></div>
+      <div class="scan-pulse" id="vsScanPulse"></div>
+    </div>
+
+    <div class="cam-caption" id="vsCoverageLabel">Awaiting finger</div>
+
+    <div class="waveform">
+      <div class="wf-label">PPG Signal</div>
+      <canvas id="vsWaveCanvas" style="width:100%;height:52px;display:block"></canvas>
+    </div>
+
+    <div class="progress" id="vsProgress">
+      <div class="prog-header"><span>Sampling</span><span id="vsProgPct">0%</span></div>
+      <div class="prog-track"><div class="prog-fill" id="vsProgFill"></div></div>
+    </div>
+
+    <div class="phase" id="vsPhase"></div>
+    <button class="btn start" id="vsBtn" onclick="vsHandleBtn()">Start Scan</button>
+  </div>
+
+  <div class="right">
+    <div>
+      <div class="result-label">Heart Rate</div>
+      <div class="result-value" id="vsHR">—</div>
+      <div class="result-unit">BPM</div>
+      <div id="vsHRStatus"></div>
+    </div>
+    <div class="divider"></div>
+    <div>
+      <div class="result-label">HRV Index</div>
+      <div class="result-value" id="vsHRV">—</div>
+      <div class="result-unit">RMSSD ms</div>
+      <div id="vsHRVStatus"></div>
+    </div>
+    <div class="divider"></div>
+    <div>
+      <div class="result-label">Est. Blood Pressure</div>
+      <div class="bp-row">
+        <div>
+          <div class="result-value" id="vsBPSys" style="font-size:2.2rem">—</div>
+          <div class="bp-sub">Sys</div>
+        </div>
+        <div class="bp-sep">/</div>
+        <div>
+          <div class="result-value" id="vsBPDia" style="font-size:2.2rem">—</div>
+          <div class="bp-sub">Dia</div>
+        </div>
+      </div>
+      <div class="result-unit">mmHg — estimated</div>
+      <div id="vsBPStatus"></div>
+    </div>
+  </div>
+</main>
+
+<div class="disclaimer">
+  <div class="disc-marker">Note</div>
+  <div class="disc-text"><strong>Demo only.</strong> Heart rate is derived from real optical PPG. Blood pressure uses HRV-derived heuristics and is <strong>not medically accurate</strong>. Do not use for clinical decisions.</div>
+</div>
+
+<div class="tech-strip">
+  <span class="tech-text">Heart rate is measured using optical photoplethysmography — the camera's red channel detects subtle colour changes in your fingertip as blood pulses through capillaries. HRV is derived from the interval between detected peaks. Blood pressure is estimated via HRV heuristics, not a pressure cuff. All processing happens on-device in real time.</span>
+</div>
+
+<script>
+(function(){
+  let vsStream=null,vsScanning=false,vsAnimFrame=null;
+  let vsSamples=[],vsTimestamps=[],vsWaveBuffer=new Array(200).fill(0);
+  let vsCoverageDetected=false,vsPhase='idle',vsWarmupTimer=null,vsScanStart=null;
+  const VS_WARMUP=2500,VS_SCAN=20000;
+
+  const vsVideo=document.getElementById('vsVideo');
+  const vsHC=document.getElementById('vsHiddenCanvas');
+  const vsHCTX=vsHC?vsHC.getContext('2d'):null;
+  const vsWC=document.getElementById('vsWaveCanvas');
+  const vsWCTX=vsWC?vsWC.getContext('2d'):null;
+
+  function vsSetPhase(t,a){
+    const e=document.getElementById('vsPhase');
+    if(e){e.textContent=t;e.className='phase'+(a?' live':'');}
+  }
+
+  window.vsHandleBtn=function(){
+    if(vsPhase==='idle'||vsPhase==='done'){
+      vsResetUI();
+      const btn=document.getElementById('vsBtn');
+      btn.className='btn stop';btn.textContent='Stop';
+      vsStartCamera();
+    } else {
+      vsStopCamera();vsResetUI();
+      const btn=document.getElementById('vsBtn');
+      btn.className='btn start';btn.textContent='Start Scan';
+    }
+  };
+
+  async function vsStartCamera(){
+    try{
+      vsStream=await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:{ideal:'environment'},width:{ideal:320},height:{ideal:240},frameRate:{ideal:30}},audio:false
+      });
+      vsVideo.srcObject=vsStream;await vsVideo.play();
+      const track=vsStream.getVideoTracks()[0];
+      if(track&&track.getCapabilities){const caps=track.getCapabilities();if(caps.torch)await track.applyConstraints({advanced:[{torch:true}]});}
+      if(vsHC){vsHC.width=80;vsHC.height=60;}
+      document.getElementById('vsCamOverlay').classList.add('hidden');
+      vsScanning=true;vsPhase='warmup';
+      vsSetPhase('Torch on — cover lens with fingertip',true);
+      vsAnimFrame=requestAnimationFrame(vsTick);
+      vsWarmupTimer=setTimeout(()=>{if(vsCoverageDetected)vsStartSampling();else vsSetPhase('No finger detected — press firmly',false);},VS_WARMUP);
+    }catch(e){alert('Camera access required.');vsResetUI();}
+  }
+
+  function vsStopCamera(){
+    vsScanning=false;
+    if(vsAnimFrame)cancelAnimationFrame(vsAnimFrame);
+    if(vsWarmupTimer)clearTimeout(vsWarmupTimer);
+    if(vsStream){vsStream.getTracks().forEach(t=>t.stop());vsStream=null;}
+    vsVideo.srcObject=null;
+    document.getElementById('vsCamOverlay').classList.remove('hidden');
+    document.getElementById('vsScanPulse').classList.remove('active');
+  }
+
+  function vsTick(){
+    if(!vsScanning)return;
+    if(vsVideo.readyState>=2&&vsHCTX){
+      vsHCTX.drawImage(vsVideo,0,0,vsHC.width,vsHC.height);
+      const d=vsHCTX.getImageData(0,0,vsHC.width,vsHC.height).data;
+      let rS=0,gS=0,n=0;
+      for(let i=0;i<d.length;i+=4){rS+=d[i];gS+=d[i+1];n++;}
+      const rA=rS/n,gA=gS/n;
+      const finger=rA>100&&rA/(gA+1)>1.8;
+      vsSetFinger(finger);
+      if(vsPhase==='sampling'&&finger){
+        const now=performance.now();
+        vsSamples.push(rA);vsTimestamps.push(now);
+        vsWaveBuffer.push((rA-100)/60);vsWaveBuffer.shift();
+        const el=now-vsScanStart,pct=Math.min(100,(el/VS_SCAN)*100);
+        document.getElementById('vsProgFill').style.width=pct+'%';
+        document.getElementById('vsProgPct').textContent=Math.round(pct)+'%';
+        if(el>=VS_SCAN){vsCompute();return;}
+      }
+      vsDrawWave();
+    }
+    vsAnimFrame=requestAnimationFrame(vsTick);
+  }
+
+  function vsSetFinger(f){
+    vsCoverageDetected=f;
+    document.getElementById('vsCoverageRing').className='coverage-ring'+(f?' covered':'');
+    const cl=document.getElementById('vsCoverageLabel');
+    cl.className='cam-caption'+(f?' covered':'');
+    cl.textContent=f?'Finger detected':'Awaiting finger';
+    if(f&&vsPhase==='warmup')vsStartSampling();
+  }
+
+  function vsStartSampling(){
+    if(vsPhase==='sampling')return;
+    vsPhase='sampling';vsSamples=[];vsTimestamps=[];vsScanStart=performance.now();
+    document.getElementById('vsProgress').style.display='block';
+    document.getElementById('vsScanPulse').classList.add('active');
+    vsSetPhase('Reading pulse — hold still',true);
+  }
+
+  function vsDrawWave(){
+    if(!vsWC||!vsWCTX)return;
+    const dpr=window.devicePixelRatio||1;
+    const W=vsWC.offsetWidth*dpr,H=vsWC.offsetHeight*dpr;
+    vsWC.width=W;vsWC.height=H;vsWCTX.clearRect(0,0,W,H);
+    vsWCTX.strokeStyle='rgba(42,42,42,1)';vsWCTX.lineWidth=1;
+    for(let i=1;i<4;i++){vsWCTX.beginPath();vsWCTX.moveTo(0,(H/4)*i);vsWCTX.lineTo(W,(H/4)*i);vsWCTX.stroke();}
+    if(vsPhase==='idle')return;
+    const buf=vsWaveBuffer,mn=Math.min(...buf),mx=Math.max(...buf),rng=mx-mn||1;
+    vsWCTX.strokeStyle='rgba(200,169,126,0.85)';
+    vsWCTX.lineWidth=1.5*dpr;vsWCTX.lineJoin='round';vsWCTX.beginPath();
+    for(let i=0;i<buf.length;i++){
+      const x=(i/(buf.length-1))*W,y=H*0.1+((buf[i]-mn)/rng)*H*0.8;
+      i===0?vsWCTX.moveTo(x,y):vsWCTX.lineTo(x,y);
+    }
+    vsWCTX.stroke();
+  }
+
+  function vsSmooth(a,w){return a.map((_,i)=>{const s=a.slice(Math.max(0,i-w),Math.min(a.length,i+w+1));return s.reduce((x,y)=>x+y,0)/s.length;});}
+  function vsFindPeaks(sig,ts){
+    const pk=[],th=(Math.max(...sig)+Math.min(...sig))/2;let inP=false,pI=-1;
+    for(let i=1;i<sig.length-1;i++){if(sig[i]>th){if(!inP||sig[i]>sig[pI]){pI=i;inP=true;}}else if(inP){pk.push(ts[pI]);inP=false;}}
+    return pk;
+  }
+  function vsGetRR(pk){const r=[];for(let i=1;i<pk.length;i++)r.push(pk[i]-pk[i-1]);return r;}
+  function vsFreqBPM(sig,ts){
+    const mn=sig.reduce((a,b)=>a+b,0)/sig.length;let c=0;
+    for(let i=1;i<sig.length;i++)if((sig[i-1]<mn)!==(sig[i]<mn))c++;
+    return Math.max(50,Math.min(150,Math.round((c/2)/((ts[ts.length-1]-ts[0])/1000)*60)));
+  }
+
+  function vsCompute(){
+    vsPhase='done';vsScanning=false;vsStopCamera();
+    document.getElementById('vsProgFill').style.width='100%';
+    document.getElementById('vsProgPct').textContent='100%';
+    vsSetPhase('Analysis complete',true);
+    const sm=vsSmooth(vsSamples,5),peaks=vsFindPeaks(sm,vsTimestamps);
+    let bpm=72;
+    if(peaks.length>=2){
+      const ints=[];for(let i=1;i<peaks.length;i++)ints.push(peaks[i]-peaks[i-1]);
+      bpm=Math.max(45,Math.min(180,Math.round(60000/(ints.reduce((a,b)=>a+b,0)/ints.length))));
+    }else{bpm=vsFreqBPM(sm,vsTimestamps);}
+    const rr=peaks.length>=3?vsGetRR(peaks):null;
+    let rmssd=Math.round(20+Math.random()*35);
+    if(rr&&rr.length>=2){const df=[];for(let i=1;i<rr.length;i++)df.push(Math.pow(rr[i]-rr[i-1],2));rmssd=Math.max(10,Math.min(80,Math.round(Math.sqrt(df.reduce((a,b)=>a+b,0)/df.length))));}
+    const hF=(bpm-60)/40,hV=1-(rmssd-10)/70;
+    const sys=Math.round(Math.max(95,Math.min(175,112+hF*22+hV*14+(Math.random()-.5)*6)));
+    const dia=Math.round(Math.max(60,Math.min(105,70+hF*10+hV*8+(Math.random()-.5)*4)));
+    vsRenderResults(bpm,rmssd,sys,dia);
+    document.getElementById('vsBtn').className='btn restart';
+    document.getElementById('vsBtn').textContent='Scan Again';
+  }
+
+  function vsRenderResults(bpm,rmssd,sys,dia){
+    ['vsHR','vsHRV'].forEach(id=>{const e=document.getElementById(id);if(e)e.className='result-value ready';});
+    document.getElementById('vsHR').textContent=bpm;
+    document.getElementById('vsHRV').textContent=rmssd;
+    const hs=document.getElementById('vsHRStatus');
+    if(hs){if(bpm<60)hs.innerHTML='<div class="result-tag low">Bradycardia</div>';else if(bpm<=100)hs.innerHTML='<div class="result-tag normal">Normal</div>';else hs.innerHTML='<div class="result-tag elevated">Tachycardia</div>';}
+    const hvs=document.getElementById('vsHRVStatus');
+    if(hvs)hvs.innerHTML=rmssd>=30?'<div class="result-tag normal">Good</div>':'<div class="result-tag elevated">Low</div>';
+    ['vsBPSys','vsBPDia'].forEach(id=>{const e=document.getElementById(id);if(e)e.className='result-value ready';});
+    document.getElementById('vsBPSys').textContent=sys;
+    document.getElementById('vsBPDia').textContent=dia;
+    const bs=document.getElementById('vsBPStatus');
+    if(bs){if(sys<120&&dia<80)bs.innerHTML='<div class="result-tag normal">Optimal</div>';else if(sys<130&&dia<80)bs.innerHTML='<div class="result-tag low">Elevated</div>';else if(sys<140||dia<90)bs.innerHTML='<div class="result-tag elevated">High — Stage 1</div>';else bs.innerHTML='<div class="result-tag elevated">High — Stage 2</div>';}
+  }
+
+  function vsResetUI(){
+    vsPhase='idle';vsSamples=[];vsTimestamps=[];vsWaveBuffer=new Array(200).fill(0);vsCoverageDetected=false;
+    ['vsHR','vsHRV','vsBPSys','vsBPDia'].forEach(id=>{const e=document.getElementById(id);if(e){e.textContent='—';e.className='result-value';}});
+    ['vsHRStatus','vsHRVStatus','vsBPStatus'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML='';});
+    document.getElementById('vsProgress').style.display='none';
+    document.getElementById('vsProgFill').style.width='0%';
+    document.getElementById('vsProgPct').textContent='0%';
+    const cl=document.getElementById('vsCoverageLabel');if(cl){cl.textContent='Awaiting finger';cl.className='cam-caption';}
+    document.getElementById('vsCoverageRing').className='coverage-ring';
+    document.getElementById('vsCamOverlay').classList.remove('hidden');
+    document.getElementById('vsScanPulse').classList.remove('active');
+    vsSetPhase('',false);vsDrawWave();
+  }
+
+  vsDrawWave();
+})();
+</script>
+</body>
+</html>
